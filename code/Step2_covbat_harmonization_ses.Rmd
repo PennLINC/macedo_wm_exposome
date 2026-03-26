@@ -1,0 +1,192 @@
+---
+title: "covbat_harmonization_cognition_ses"
+output: html_document
+date: "2025-09-09"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# https://github.com/andy1764/ComBatFamily
+# https://github.com/andy1764/CovBat_Harmonization/blob/master/R/R/covbat.R
+install.packages("remotes")
+remotes::install_github("andy1764/ComBatFamily")
+install.packages("devtools")
+devtools::install_github("andy1764/CovBat_Harmonization/R")
+```
+
+```{r}
+library(ComBatFamily)
+library(CovBat)
+library(data.table)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+```
+
+```{r}
+# which analysis are we running? set that analysis to TRUE and all others to FALSE
+main_analysis = FALSE
+cognition_analysis = FALSE
+income_analysis = TRUE
+
+# assserts that only one analysis is selected
+if(sum(main_analysis+cognition_analysis+income_analysis) != 1) {
+  stop("You must select exactly one analysis to run")
+}
+```
+
+Load in data, outputs from `Step1_Data_Prep.ipynb` 
+```{r}
+# Define root directory
+ROOT_DIR <- "/Users/bmacedo/Desktop/final_WM"
+
+# Define subdirectories
+OUTPUT_DIR <- file.path(ROOT_DIR, "output_data")
+CLEANED_DIR <- file.path(OUTPUT_DIR, "cleaned")
+HARMONIZED_DIR <- file.path(OUTPUT_DIR, "harmonized")
+
+if (main_analysis) {
+  exposome_df <- read.csv(file.path(CLEANED_DIR, "exposome_FINAL_11_3.csv"))
+}
+
+if (cognition_analysis) {
+  exposome_df <- read.csv(file.path(CLEANED_DIR, "exposome_FINAL_cognition_11_10.csv"))
+}
+
+if (income_analysis) {
+  exposome_df <- read.csv(file.path(CLEANED_DIR, "parental_edu_income_sensitivity_df.csv"))
+}
+```
+
+Create vectors of training and testing data for harmonization
+We only use the training data for harmonization procedure to avoid data leakage
+```{r}
+# create a logical vector for covbat function so it knows which data to use for harmonization
+# when A is training data
+exposome_group_vector_A_train = ifelse(exposome_df$matched_group == 1, TRUE, FALSE)
+# when B is training data
+exposome_group_vector_B_train = ifelse(exposome_df$matched_group == 2, TRUE, FALSE) 
+
+n_A <- sum(exposome_group_vector_A_train)
+n_B <- sum(exposome_group_vector_B_train)
+
+cat("Group A:", n_A, "\nGroup B:", n_B, "\n")
+```
+main_analysis: Group A: 4185, Group B: 4243 
+cognition_analysis: Group A: 3921, Group B: 3956
+edu_sensitivity: Group A: 3371, Group B: 3438
+
+```{r}
+exposome_batch = as.factor(exposome_df$site) # batch is the site
+```
+
+```{r}
+# extract  the features that we want to harmonize (all metrics for all bundles)
+# select only columns that start with "msmt_"
+msmt_cols <- grep("^msmt_", names(exposome_df), value = TRUE)
+
+# subset dataframe to only those columns
+data_exposome_clean <- exposome_df[, msmt_cols]
+
+# convert to transposed numeric matrix for input into covbat
+data_exposome <- data.matrix(data_exposome_clean)
+data_exposome <- t(data_exposome) # (features x subjects)
+```
+
+Select which demographic covariates we want CovBat to protect: signal from these covariates will be maintained even after harmonization
+```{r}
+# we protect age, sex, head motion, and exposome scores
+
+if(main_analysis) {
+  mod_exposome <- model.matrix(~ age + sex +
+                               General_SES + School + Family_Values + Family_Turmoil +
+                               Dense_Urban_Poverty + Extracurriculars + Screen_Time,
+                             data = exposome_df)}
+
+if(cognition_analysis){
+  mod_exposome <- model.matrix(~ age + sex + 
+                               General_SES + School + Family_Values + Family_Turmoil +
+                               Dense_Urban_Poverty + Extracurriculars + Screen_Time +
+                               neurocog_pc1.bl + neurocog_pc2.bl + neurocog_pc3.bl,
+                             data = exposome_df)}
+
+if(income_analysis){
+  mod_exposome <- model.matrix(~ age + sex + qc_prediction + parental_education + income,
+                             data = exposome_df)}
+
+```
+
+Run the covbat algorithm 
+```{r}
+covbat_exposome_A <- covbat(dat = data_exposome,
+                        bat = exposome_batch,
+                        mod = mod_exposome,
+                        train = exposome_group_vector_A_train)
+
+covbat_exposome_B <- covbat(dat = data_exposome,
+                        bat = exposome_batch,
+                        mod = mod_exposome,
+                        train = exposome_group_vector_B_train)
+
+```
+
+```{r}
+if (!dir.exists(HARMONIZED_DIR)) { dir.create(HARMONIZED_DIR, recursive = TRUE) }
+
+## extract harmonized metrics
+harmonized_exposome_A <- t(covbat_exposome_A$dat.covbat)
+harmonized_exposome_B <- t(covbat_exposome_B$dat.covbat)
+
+## combine harmonized metrics back with our demographic and exposome measures
+msmt_idx <- grep("^msmt_", names(exposome_df))
+df_harmonized_exposome_A <- cbind(exposome_df[, -c(msmt_idx)], harmonized_exposome_A)
+df_harmonized_exposome_B <- cbind(exposome_df[, -c(msmt_idx)], harmonized_exposome_B)
+
+## define filenames
+if (main_analysis) {
+  fileA <- "df_harmonized_exposome_A_12_10.csv"
+  fileB <- "df_harmonized_exposome_B_12_10.csv"
+}
+
+if (cognition_analysis) {
+  fileA <- "df_harmonized_exposome_cognition_A_12_10.csv"
+  fileB <- "df_harmonized_exposome_cognition_B_12_10.csv"
+}
+
+if (income_analysis) {
+  fileA <- "df_income_sens_A_11_30.csv"
+  fileB <- "df_income_sens_B_11_30.csv"
+}
+
+## full paths
+outputfileA <- file.path(HARMONIZED_DIR, fileA)
+outputfileB <- file.path(HARMONIZED_DIR, fileB)
+
+## save
+write.csv(df_harmonized_exposome_A, file = outputfileA, row.names = FALSE)
+write.csv(df_harmonized_exposome_B, file = outputfileB, row.names = FALSE)
+
+cat("[SAVE] A →", outputfileA, "\n")
+cat("[SAVE] B →", outputfileB, "\n")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

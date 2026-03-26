@@ -1,0 +1,122 @@
+---
+title: "HBN_gam_SES"
+output: html_document
+date: "2026-01-20"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(mgcv)
+library(data.table)
+```
+
+```{r}
+# Define root + dirs
+ROOT_DIR <- "/Users/bmacedo/Desktop/final_WM"
+
+HARMONIZED_DIR <- file.path(ROOT_DIR, "output_data", "harmonized", "HBN")
+FIG6_DIR <- file.path(ROOT_DIR, "output_data", "results", "main_figures", "figure6")
+
+# create output dir if needed
+if (!dir.exists(FIG6_DIR)) {
+  dir.create(FIG6_DIR, recursive = TRUE)
+}
+
+# paths
+in_path  <- file.path(HARMONIZED_DIR, "HBN_harmonized_refABCD16_01_20.csv")
+out_path <- file.path(FIG6_DIR, "HBN_SES_partial_gam_results.csv")
+
+dt <- fread(in_path)
+cat("Rows:", nrow(dt), "Cols:", ncol(dt), "\n")
+```
+
+```{r}
+target_cov <- "General_SES"
+covars <- c("age", "sex", "qc_prediction")
+msmt_cols <- grep("^msmt_", names(dt), value=TRUE)
+dt[, sex := as.factor(sex)]
+```
+
+```{r}
+run_partial_gam <- function(df, msmt_cols, target_cov="General_SES",
+                            covars=c("age","sex","qc_prediction"),
+                            k_age=6, min_n=30) {
+  df <- as.data.table(df)
+  out <- vector("list", length(msmt_cols))
+
+  lin_covars <- setdiff(covars, "age")  # all linear besides age
+
+  for (i in seq_along(msmt_cols)) {
+    feat <- msmt_cols[i]
+    d <- df[, c(feat, target_cov, covars), with=FALSE]
+    d <- na.omit(d)
+
+    if (nrow(d) < min_n) {
+      out[[i]] <- data.table(feature=feat, covariate=target_cov,
+                             partial_r=NA_real_, partial_R2=NA_real_,
+                             p_value=NA_real_, p_fdr=NA_real_,
+                             n=nrow(d), edf_age=NA_real_)
+      next
+    }
+
+    d[, y := as.numeric(scale(get(feat)))]
+
+    rhs_full <- paste0(target_cov, " + s(age, k=", k_age, ")",
+      if (length(lin_covars) > 0) paste0(" + ", paste(lin_covars, collapse=" + ")) else ""
+    )
+    rhs_red <- paste0("s(age, k=", k_age, ")",
+      if (length(lin_covars) > 0) paste0(" + ", paste(lin_covars, collapse=" + ")) else ""
+    )
+
+    m_full <- gam(as.formula(paste("y ~", rhs_full)), data=d, method="REML")
+    m_red  <- gam(as.formula(paste("y ~", rhs_red)),  data=d, method="REML")
+
+    # partial R2 analog via mgcv r.sq
+    r2_full <- summary(m_full)$r.sq
+    r2_red  <- summary(m_red)$r.sq
+    partial_R2 <- (r2_full - r2_red) / (1 - r2_red)
+
+    # nested test for adding SES (linear)
+    a <- anova(m_red, m_full, test="F")
+    p_val <- a$`Pr(>F)`[2]
+
+    # signed partial r analog: correlate SES linear contribution with y residualized on reduced model
+    beta <- unname(coef(m_full)[target_cov])
+    partial_r <- sign(beta) * sqrt(abs(partial_R2))
+
+
+    # record achieved edf for s(age)
+    st <- summary(m_full)$s.table
+    edf_age <- NA_real_
+    if (!is.null(st) && nrow(st) > 0) {
+      idx <- grep("^s\\(age\\)$", rownames(st))
+      if (length(idx) == 1) edf_age <- as.numeric(st[idx, "edf"])
+    }
+
+    out[[i]] <- data.table(feature=feat, covariate=target_cov,
+                           partial_r=partial_r,
+                           partial_R2=partial_R2,
+                           p_value=p_val,
+                           n=nrow(d),
+                           edf_age=edf_age)
+  }
+
+  res <- rbindlist(out)
+  res[, p_fdr := p.adjust(p_value, method="BH")]
+  res[]
+}
+```
+
+```{r}
+res <- run_partial_gam(df=dt, msmt_cols=msmt_cols, target_cov=target_cov, 
+                       covars=covars, k_age=3, min_n=30)
+```
+
+```{r}
+fwrite(res, out_path)
+```
+
+
