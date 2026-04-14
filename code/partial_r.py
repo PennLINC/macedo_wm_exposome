@@ -98,6 +98,20 @@ def collapse_lr(df):
 
     return df
 
+def get_bundle_type(bundle_name):
+    if bundle_name.startswith("Association_"):
+        return "Association_"
+    elif bundle_name.startswith("ProjectionBasalGanglia_"):
+        return "ProjectionBasalGanglia_"
+    elif bundle_name.startswith("ProjectionBrainstem_"):
+        return "ProjectionBrainstem_"
+    elif bundle_name.startswith("Cerebellum_"):
+        return "Cerebellum_"
+    elif bundle_name.startswith("Commissure_"):
+        return "Commissure_"
+    else:
+        return None
+
 def draw_star(ax, x, y, s, fontsize=5.5):
     ax.annotate(s, (x, y), xytext=(0, -0.9), textcoords="offset points", fontsize=fontsize,
                 ha="center", va="center", fontweight="bold", clip_on=True, zorder=10)
@@ -107,7 +121,8 @@ def make_partial_r_heatmap_split_half(
     noddi_macro_metrics_dict=None,
     dki_macro_metrics_dict=None,
     norm=None,
-    alphas=[0.05, 0.01, 0.001]
+    alphas=[0.05, 0.01, 0.001],
+    bundle_palette=None
 ):
     """
     • Collapses L/R bundles
@@ -236,6 +251,12 @@ def make_partial_r_heatmap_split_half(
     bundles_clean = [clean_bundle_name_noLR(b) for b in bundles]
     ax.set_yticklabels(bundles_clean)
 
+    for tick_label, raw_bundle in zip(ax.get_yticklabels(), bundles):
+        bundle_type = get_bundle_type(raw_bundle)
+        if bundle_palette is not None and bundle_type in bundle_palette:
+            tick_label.set_color(bundle_palette[bundle_type])
+            tick_label.set_fontweight("bold")
+
     # divider between main metrics and macro metrics
     divider_index = len(main_metrics)
     if divider_index > 0:
@@ -325,7 +346,9 @@ def make_partial_r_heatmap_split_half(
 
     return ax
     
-def make_partial_r_heatmap_with_fdr_stars(df, covariate, ax, cmap, noddi_macro_metrics_dict, tract_dict, norm=None, alphas=[0.05, 0.01, 0.001], cbar_label="Partial $r$ (General Exposome)"):
+def make_partial_r_heatmap_with_fdr_stars(df, covariate, ax, cmap, noddi_macro_metrics_dict, tract_dict, norm=None, 
+                                          alphas=[0.05, 0.01, 0.001], cbar_label="Partial $r$ (General Exposome)",
+                                          bundle_palette=None):
     df = df[df["covariate"] == covariate].copy()
     clean = df["feature"].astype(str).str.replace(r"^msmt_", "", regex=True)
     parsed = clean.str.split("_", n=1, expand=True)
@@ -396,6 +419,12 @@ def make_partial_r_heatmap_with_fdr_stars(df, covariate, ax, cmap, noddi_macro_m
     ax.margins(x=0)
 
     ax.set_yticklabels([tract_dict.get(b, b) for b in bundles])
+
+    for tick_label, raw_bundle in zip(ax.get_yticklabels(), bundles):
+        bundle_type = get_bundle_type(raw_bundle)
+        if bundle_palette is not None and bundle_type in bundle_palette:
+            tick_label.set_color(bundle_palette[bundle_type])
+            tick_label.set_fontweight("bold")
 
     divider_index = len(main_metrics)
     if divider_index > 0 and divider_index < len(metrics): ax.axvline(divider_index, color="black", lw=2.0)
