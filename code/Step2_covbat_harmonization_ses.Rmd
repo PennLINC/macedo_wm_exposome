@@ -1,4 +1,4 @@
----
+s---
 title: "covbat_harmonization_cognition_ses"
 output: html_document
 date: "2025-09-09"
@@ -6,6 +6,13 @@ date: "2025-09-09"
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+options(repos = c(CRAN="https://cloud.r-project.org"))
+install.packages("remotes")
+remotes::install_github("andy1764/ComBatFamily")
+remotes::install_github("andy1764/CovBat_Harmonization", dependencies=TRUE)
 ```
 
 ```{r}
@@ -19,7 +26,6 @@ devtools::install_github("andy1764/CovBat_Harmonization/R")
 
 ```{r}
 library(ComBatFamily)
-library(CovBat)
 library(data.table)
 library(dplyr)
 library(tidyr)
@@ -28,9 +34,9 @@ library(ggplot2)
 
 ```{r}
 # which analysis are we running? set that analysis to TRUE and all others to FALSE
-main_analysis = FALSE
+main_analysis = TRUE
 cognition_analysis = FALSE
-income_analysis = TRUE
+income_analysis = FALSE
 
 # assserts that only one analysis is selected
 if(sum(main_analysis+cognition_analysis+income_analysis) != 1) {
@@ -41,12 +47,19 @@ if(sum(main_analysis+cognition_analysis+income_analysis) != 1) {
 Load in data, outputs from `Step1_Data_Prep.ipynb` 
 ```{r}
 # Define root directory
-ROOT_DIR <- "/Users/bmacedo/Desktop/final_WM"
+# ROOT_DIR <- "/Users/bmacedo/Desktop/final_WM"
+ROOT_DIR <- "/mnt/isilon/bgdlab_hbcd/projects/macedo_wm_exposome/macedo_wm_exposome"
 
 # Define subdirectories
 OUTPUT_DIR <- file.path(ROOT_DIR, "output_data")
 CLEANED_DIR <- file.path(OUTPUT_DIR, "cleaned")
 HARMONIZED_DIR <- file.path(OUTPUT_DIR, "harmonized")
+
+dir.create(OUTPUT_DIR, recursive = TRUE, showWarnings = FALSE)
+dir.create(CLEANED_DIR, recursive = TRUE, showWarnings = FALSE)
+dir.create(HARMONIZED_DIR, recursive = TRUE, showWarnings = FALSE)
+
+ref_batch <- "16"
 
 if (main_analysis) {
   exposome_df <- read.csv(file.path(CLEANED_DIR, "exposome_FINAL_11_3.csv"))
@@ -69,67 +82,144 @@ We only use the training data for harmonization procedure to avoid data leakage
 exposome_group_vector_A_train = ifelse(exposome_df$matched_group == 1, TRUE, FALSE)
 # when B is training data
 exposome_group_vector_B_train = ifelse(exposome_df$matched_group == 2, TRUE, FALSE) 
-
 n_A <- sum(exposome_group_vector_A_train)
 n_B <- sum(exposome_group_vector_B_train)
 
 cat("Group A:", n_A, "\nGroup B:", n_B, "\n")
 ```
-main_analysis: Group A: 4185, Group B: 4243 
+main_analysis: Group A: 4078, Group B: 4097s 
 cognition_analysis: Group A: 3921, Group B: 3956
 edu_sensitivity: Group A: 3371, Group B: 3438
 
 ```{r}
 exposome_batch = as.factor(exposome_df$site) # batch is the site
+exposome_batch <- relevel(exposome_batch, ref = "16")
+
+# optional check
+table(exposome_batch, useNA = "ifany")
+levels(exposome_batch)
 ```
 
 ```{r}
 # extract  the features that we want to harmonize (all metrics for all bundles)
 # select only columns that start with "msmt_"
-msmt_cols <- grep("^msmt_", names(exposome_df), value = TRUE)
+msmt_cols <- grep("^bundle_", names(exposome_df), value = TRUE)
 
 # subset dataframe to only those columns
 data_exposome_clean <- exposome_df[, msmt_cols]
 
 # convert to transposed numeric matrix for input into covbat
 data_exposome <- data.matrix(data_exposome_clean)
-data_exposome <- t(data_exposome) # (features x subjects)
 ```
 
 Select which demographic covariates we want CovBat to protect: signal from these covariates will be maintained even after harmonization
 ```{r}
 # we protect age, sex, head motion, and exposome scores
 
-if(main_analysis) {
-  mod_exposome <- model.matrix(~ age + sex +
-                               General_SES + School + Family_Values + Family_Turmoil +
-                               Dense_Urban_Poverty + Extracurriculars + Screen_Time,
-                             data = exposome_df)}
+# build covariate dataframe and linear formula
+if (main_analysis) {
+  cov_exposome <- exposome_df[, c(
+    "age", "sex",
+    "General_SES", "School", "Family_Values", "Family_Turmoil",
+    "Dense_Urban_Poverty", "Extracurriculars", "Screen_Time"
+  )]
 
-if(cognition_analysis){
-  mod_exposome <- model.matrix(~ age + sex + 
-                               General_SES + School + Family_Values + Family_Turmoil +
-                               Dense_Urban_Poverty + Extracurriculars + Screen_Time +
-                               neurocog_pc1.bl + neurocog_pc2.bl + neurocog_pc3.bl,
-                             data = exposome_df)}
+  lm_formula <- y ~ age + sex +
+    General_SES + School + Family_Values + Family_Turmoil +
+    Dense_Urban_Poverty + Extracurriculars + Screen_Time
+}
 
-if(income_analysis){
-  mod_exposome <- model.matrix(~ age + sex + qc_prediction + parental_education + income,
-                             data = exposome_df)}
+if (cognition_analysis) {
+  cov_exposome <- exposome_df[, c(
+    "age", "sex",
+    "General_SES", "School", "Family_Values", "Family_Turmoil",
+    "Dense_Urban_Poverty", "Extracurriculars", "Screen_Time",
+    "neurocog_pc1.bl", "neurocog_pc2.bl", "neurocog_pc3.bl"
+  )]
 
+  lm_formula <- y ~ age + sex +
+    General_SES + School + Family_Values + Family_Turmoil +
+    Dense_Urban_Poverty + Extracurriculars + Screen_Time +
+    neurocog_pc1.bl + neurocog_pc2.bl + neurocog_pc3.bl
+}
+
+if (income_analysis) {
+  cov_exposome <- exposome_df[, c(
+    "age", "sex", "qc_prediction", "parental_education", "income"
+  )]
+
+  lm_formula <- y ~ age + sex + qc_prediction + parental_education + income
+}
 ```
 
 Run the covbat algorithm 
 ```{r}
-covbat_exposome_A <- covbat(dat = data_exposome,
-                        bat = exposome_batch,
-                        mod = mod_exposome,
-                        train = exposome_group_vector_A_train)
+# -------------------------
+# A as training set
+# -------------------------
+train_idx_A <- exposome_group_vector_A_train
+test_idx_A  <- !train_idx_A
 
-covbat_exposome_B <- covbat(dat = data_exposome,
-                        bat = exposome_batch,
-                        mod = mod_exposome,
-                        train = exposome_group_vector_B_train)
+# optional safety check:
+if (!any(exposome_batch[train_idx_A] == ref_batch)) {
+  stop("Reference site 16 is not present in A training data")
+}
+
+covbat_exposome_A_fit <- covfam(
+  data      = data_exposome[train_idx_A, , drop = FALSE],
+  bat       = droplevels(exposome_batch[train_idx_A]),
+  covar     = cov_exposome[train_idx_A, , drop = FALSE],
+  model     = lm,
+  formula   = lm_formula
+)
+
+# harmonized training data
+covbat_exposome_A_train_harmonized <- covbat_exposome_A_fit$dat.covbat
+
+# apply learned harmonization parameters to test data
+covbat_exposome_A_test_pred <- predict(
+  covbat_exposome_A_fit,
+  newdata  = data_exposome[test_idx_A, , drop = FALSE],
+  newbat   = factor(as.character(exposome_batch[test_idx_A]),
+                    levels = levels(droplevels(exposome_batch[train_idx_A]))),
+  newcovar = cov_exposome[test_idx_A, , drop = FALSE]
+)
+
+covbat_exposome_A_test_harmonized <- covbat_exposome_A_test_pred$dat.covbat
+
+# -------------------------
+# B as training set
+# -------------------------
+train_idx_B <- exposome_group_vector_B_train
+test_idx_B  <- !train_idx_B
+
+# optional safety check:
+if (!any(exposome_batch[train_idx_B] == ref_batch)) {
+  stop("Reference site 16 is not present in B training data")
+}
+
+covbat_exposome_B_fit <- covfam(
+  data      = data_exposome[train_idx_B, , drop = FALSE],
+  bat       = droplevels(exposome_batch[train_idx_B]),
+  covar     = cov_exposome[train_idx_B, , drop = FALSE],
+  model     = lm,
+  formula   = lm_formula,
+  ref.batch = ref_batch
+)
+
+# harmonized training data
+covbat_exposome_B_train_harmonized <- covbat_exposome_B_fit$dat.covbat
+
+# apply learned harmonization parameters to test data
+covbat_exposome_B_test_pred <- predict(
+  covbat_exposome_B_fit,
+  newdata  = data_exposome[test_idx_B, , drop = FALSE],
+  newbat   = factor(as.character(exposome_batch[test_idx_B]),
+                    levels = levels(droplevels(exposome_batch[train_idx_B]))),
+  newcovar = cov_exposome[test_idx_B, , drop = FALSE]
+)
+
+covbat_exposome_B_test_harmonized <- covbat_exposome_B_test_pred$dat.covbat
 
 ```
 

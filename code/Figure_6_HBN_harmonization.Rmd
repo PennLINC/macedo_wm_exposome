@@ -29,7 +29,8 @@ suppressPackageStartupMessages({
 # 0) load data
 outputs from `HBN_replication_regression.ipynb` and `Step1_Data_Prep.ipynb`, respectively
 ```{r}
-ROOT_DIR <- "/Users/bmacedo/Desktop/final_WM"
+# ROOT_DIR <- "/Users/bmacedo/Desktop/final_WM"
+ROOT_DIR = "/mnt/isilon/bgdlab_hbcd/projects/macedo_wm_exposome/macedo_wm_exposome"
 
 # Directories
 CLEANED_DIR <- file.path(ROOT_DIR, "output_data", "cleaned")
@@ -50,21 +51,23 @@ hbn_df <- hbn_raw %>% rename(age = Age, sex = Sex, qc_prediction = t1_neighbor_c
 ```{r}
 feature_cols <- grep("^FEATURES_", names(hbn_df), value = TRUE)
 
-make_msmt_name <- function(col) {
-  rest  <- sub("^FEATURES_", "", col)
+make_bundle_name <- function(col) {
+  rest <- sub("^FEATURES_", "", col)
   parts <- strsplit(rest, "_", fixed = TRUE)[[1]]
-  if (length(parts) < 2) return(col)
 
-  bundle <- paste0(parts[1], parts[2])
-  metric <- if (length(parts) >= 3) paste(parts[3:length(parts)], collapse = "_") else ""
+  if (length(parts) < 3) return(col)
 
-  if (nchar(metric) > 0) paste0("msmt_", bundle, "_", metric) else paste0("msmt_", bundle)
+  bundle_id <- paste(parts[1:2], collapse = "_")
+  metric <- paste(parts[3:length(parts)], collapse = "_")
+
+  paste0("bundle_", bundle_id, "_", metric)
 }
 
-new_names <- vapply(feature_cols, make_msmt_name, character(1))
+new_names <- vapply(feature_cols, make_bundle_name, character(1))
 
 # apply rename only to those columns
 names(hbn_df)[match(feature_cols, names(hbn_df))] <- new_names
+
 ```
 
 # 3) add dataset label, create unique batch IDs
@@ -77,8 +80,8 @@ ref_batch <- "ABCD_16"  # anchor
 
 # 4) choose harmonization feature columns
 ```{r}
-hbn_msmt_cols  <- grep("^msmt_", names(hbn_df),  value = TRUE)
-abcd_msmt_cols <- grep("^msmt_", names(abcd_df), value = TRUE)
+hbn_msmt_cols  <- grep("^bundle_", names(hbn_df),  value = TRUE)
+abcd_msmt_cols <- grep("^bundle_", names(abcd_df), value = TRUE)
 msmt_cols <- intersect(hbn_msmt_cols, abcd_msmt_cols)
 
 cat("HBN msmt cols:", length(hbn_msmt_cols), "\n")
@@ -87,7 +90,7 @@ cat("Intersect msmt_cols:", length(msmt_cols), "\n")
 ```
 
 ```{r}
-get_bundle <- function(x) sub("^msmt_([^_]+)_.*$", "\\1", x)
+get_bundle <- function(x) sub("^bundle_([^_]+_[^_]+)_.*$", "\\1", x)
 
 hbn_bundles  <- sort(unique(get_bundle(hbn_msmt_cols)))
 abcd_bundles <- sort(unique(get_bundle(abcd_msmt_cols)))
@@ -123,7 +126,7 @@ harm <- covfam(data=as.matrix(all_df[, msmt_cols]),
                bat=all_df$batch, 
                covar=all_df[, c("age","sex")], 
                model=mgcv::gam, 
-               formula=y ~ s(age, k=3) + sex, 
+               formula=y ~ s(age, k=3) + sex + General_SES, 
                eb=TRUE, 
                ref.batch=ref_batch)
 

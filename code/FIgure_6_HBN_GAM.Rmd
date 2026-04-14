@@ -15,7 +15,8 @@ library(data.table)
 
 ```{r}
 # Define root + dirs
-ROOT_DIR <- "/Users/bmacedo/Desktop/final_WM"
+# ROOT_DIR <- "/Users/bmacedo/Desktop/final_WM"
+ROOT_DIR = "/mnt/isilon/bgdlab_hbcd/projects/macedo_wm_exposome/macedo_wm_exposome"
 
 HARMONIZED_DIR <- file.path(ROOT_DIR, "output_data", "harmonized", "HBN")
 FIG6_DIR <- file.path(ROOT_DIR, "output_data", "results", "main_figures", "figure6")
@@ -36,7 +37,7 @@ cat("Rows:", nrow(dt), "Cols:", ncol(dt), "\n")
 ```{r}
 target_cov <- "General_SES"
 covars <- c("age", "sex", "qc_prediction")
-msmt_cols <- grep("^msmt_", names(dt), value=TRUE)
+msmt_cols <- grep("^bundle_", names(dt), value=TRUE)
 dt[, sex := as.factor(sex)]
 ```
 

@@ -14,7 +14,7 @@ from sklearn.preprocessing import StandardScaler
 from statsmodels.stats.multitest import multipletests
 
 def run_partial_r(df, msmt_cols, covariates, include_etiv=False, target_cov="General_SES"):
-    predictors = covariates + (["estimated_brain_volume"] if include_etiv else [])
+    predictors = covariates + (["eTIV"] if include_etiv else [])
     scaler = StandardScaler()
     out_rows = []
 
@@ -72,7 +72,7 @@ def plot_replicability_scatter(dfA, dfB, covariate, ax):
     ax.text(0.05, 0.95, f"r = {r:.2f}", transform=ax.transAxes, fontsize=12, verticalalignment="top", 
             bbox=dict(facecolor="white", alpha=0.8, lw=0))
 
-prefixes = ['Association', 'Cerebellum', 'Commissure', 'ProjectionBrainstem', 'ProjectionBasalGanglia']
+prefixes = ['Association_', 'Cerebellum_', 'Commissure_', 'ProjectionBrainstem_', 'ProjectionBasalGanglia_']
 
 def clean_bundle_name_noLR(name):
     name = re.sub(r'(L|R)$', '', name) 
@@ -85,10 +85,17 @@ def clean_bundle_name_noLR(name):
 
 def collapse_lr(df):
     df = df.copy()
-    df["clean_feature"] = df["feature"].str.replace(r"^msmt_", "", regex=True)  # remove msmt_
-    tmp = df["clean_feature"].str.split("_", n=1, expand=True)
-    df["bundle"] = tmp[0].str.replace(r"(L|R)$", "", regex=True)
-    df["metric"] = tmp[1]
+
+    parts = df["feature"].str.split("_")
+    df = df[parts.str.len() >= 4].copy()
+    parts = df["feature"].str.split("_")
+
+    df["bundle"] = (
+        parts.str[1] + "_" + parts.str[2]
+    ).str.replace(r"(?i)(l|r)$", "", regex=True)
+
+    df["metric"] = parts.str[3:].str.join("_")
+
     return df
 
 def draw_star(ax, x, y, s, fontsize=5.5):
