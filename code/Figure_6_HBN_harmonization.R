@@ -20,7 +20,31 @@ if (!dir.exists(HARMONIZED_DIR)) {
 
 message("[INFO] Loading data...")
 hbn_raw  <- read.csv(file.path(HBN_DIR, "final_hbn_dataset_12_23.csv"), check.names = FALSE)
-abcd_raw <- read.csv(file.path(CLEANED_DIR, "exposome_FINAL_cognition_11_10.csv"), check.names = FALSE)
+abcd_raw <- read.csv(file.path(CLEANED_DIR, "exposome_FINAL_11_3.csv"), check.names = FALSE)
+
+# -------------------------
+# FIX NODDI naming in ABCD
+# -------------------------
+# 1. Identify bundle columns
+abcd_bundle_cols <- grep("^bundle_", names(abcd_raw), value = TRUE)
+
+# 2. Drop NODDI mean columns
+drop_cols <- abcd_bundle_cols[grepl("NODDI_.*_mean$", abcd_bundle_cols, ignore.case = TRUE)]
+if (length(drop_cols) > 0) {
+  message("[INFO] Dropping NODDI mean cols: ", length(drop_cols))
+  abcd_raw <- abcd_raw[, !(names(abcd_raw) %in% drop_cols), drop = FALSE]
+}
+
+# 3. Rename NODDI median → remove suffix
+rename_cols <- grep("NODDI_.*_median$", names(abcd_raw), value = TRUE)
+
+if (length(rename_cols) > 0) {
+  new_names <- sub("_median$", "", rename_cols)
+  
+  message("[INFO] Renaming NODDI median cols: ", length(rename_cols))
+  
+  names(abcd_raw)[match(rename_cols, names(abcd_raw))] <- new_names
+}
 
 bad_idx <- which(is.na(names(hbn_raw)) | trimws(names(hbn_raw)) == "")
 if (length(bad_idx) > 0) {

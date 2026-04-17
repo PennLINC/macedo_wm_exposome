@@ -346,49 +346,136 @@ def make_partial_r_heatmap_split_half(
 
     return ax
     
-def make_partial_r_heatmap_with_fdr_stars(df, covariate, ax, cmap, noddi_macro_metrics_dict, tract_dict, norm=None, 
-                                          alphas=[0.05, 0.01, 0.001], cbar_label="Partial $r$ (General Exposome)",
-                                          bundle_palette=None):
-    df = df[df["covariate"] == covariate].copy()
-    clean = df["feature"].astype(str).str.replace(r"^msmt_", "", regex=True)
-    parsed = clean.str.split("_", n=1, expand=True)
-    parsed.columns = ["bundle", "metric"]
-    df = pd.concat([df, parsed], axis=1).dropna(subset=["bundle", "metric"])
+def _prepare_partial_r_heatmap_data(
+    df,
+    covariate,
+    value_col,
+    p_col="p_fdr",
+    noddi_macro_metrics_dict=None,
+    dki_macro_metrics_dict=None
+):
+    """
+    Shared preprocessing for partial-r heatmaps:
+      • filter covariate
+      • collapse L/R
+      • average across L/R
+      • infer metric family
+      • enforce metric order
+      • build value and p-value matrices
+    """
+
+    df = collapse_lr(df[df["covariate"] == covariate])
+
+    df = df.groupby(["bundle", "metric", "covariate"], as_index=False).agg(
+        {value_col: "mean", p_col: "mean"}
+    )
 
     unique_metrics = df["metric"].unique().tolist()
+
     if any(m.startswith("NODDI") for m in unique_metrics):
-        lookup_dict = noddi_macro_metrics_dict
+        lookup_dict = noddi_macro_metrics_dict if noddi_macro_metrics_dict is not None else {}
         main_metrics = sorted([m for m in unique_metrics if m.startswith("NODDI")])
         other_metrics = [m for m in unique_metrics if not m.startswith("NODDI")]
+
     elif any(m.startswith("DKI") for m in unique_metrics):
-        lookup_dict = dki_macro_metrics_dict  # expects in module scope, same as split-half
+        lookup_dict = dki_macro_metrics_dict if dki_macro_metrics_dict is not None else {}
         main_metrics = sorted([m for m in unique_metrics if m.startswith("DKI")])
         other_metrics = [m for m in unique_metrics if not m.startswith("DKI")]
+
     else:
         lookup_dict = {}
         main_metrics = []
         other_metrics = unique_metrics
 
-    macro_order = ["1st_quarter_volume_mm3", "2nd_and_3rd_quarter_volume_mm3", "4th_quarter_volume_mm3", "volume_of_end_branches_1", "volume_of_end_branches_2", "total_volume_mm3", "area_of_end_region_1_mm2", "area_of_end_region_2_mm2", "total_area_of_end_regions_mm2", "total_surface_area_mm2", "radius_of_end_region_1_mm", "radius_of_end_region_2_mm", "total_radius_of_end_regions_mm", "irregularity", "curl", "elongation", "mean_length_mm", "span_mm"]
+    macro_order = [
+        "1st_quarter_volume_mm3", "2nd_and_3rd_quarter_volume_mm3", "4th_quarter_volume_mm3",
+        "volume_of_end_branches_1", "volume_of_end_branches_2", "total_volume_mm3",
+        "area_of_end_region_1_mm2", "area_of_end_region_2_mm2", "total_area_of_end_regions_mm2",
+        "total_surface_area_mm2", "radius_of_end_region_1_mm", "radius_of_end_region_2_mm",
+        "total_radius_of_end_regions_mm", "irregularity", "curl", "elongation",
+        "mean_length_mm", "span_mm"
+    ]
+
     macro_metrics = [m for m in macro_order if m in other_metrics]
     metric_order = main_metrics + macro_metrics
 
-    mat = df.pivot(index="bundle", columns="metric", values="partial_r").reindex(columns=metric_order)
-    pmap = df.pivot(index="bundle", columns="metric", values="p_fdr").reindex_like(mat)
+    mat = df.pivot(index="bundle", columns="metric", values=value_col).reindex(columns=metric_order)
+    pmap = df.pivot(index="bundle", columns="metric", values=p_col).reindex_like(mat)
 
     bundles = mat.index.tolist()
     metrics = mat.columns.tolist()
 
+    return {
+        "df": df,
+        "mat": mat,
+        "pmap": pmap,
+        "bundles": bundles,
+        "metrics": metrics,
+        "lookup_dict": lookup_dict,
+        "main_metrics": main_metrics,
+        "metric_order": metric_order,
+        "unique_metrics": unique_metrics,
+    }
+
+def make_partial_r_heatmap_with_fdr_stars(
+    df,
+    covariate,
+    ax,
+    cmap,
+    noddi_macro_metrics_dict=None,
+    dki_macro_metrics_dict=None,
+    norm=None,
+    alphas=[0.05, 0.01, 0.001],
+    cbar_label=r"Partial $r$ (General Exposome)",
+    bundle_palette=None
+):
+    """
+    Single-dataset partial-r heatmap with:
+      • same preprocessing / ordering / labels as split-half version
+      • one full square per cell
+      • FDR stars on significant cells
+    """
+
+    prep = _prepare_partial_r_heatmap_data(
+        df=df,
+        covariate=covariate,
+        value_col="partial_r",
+        p_col="p_fdr",
+        noddi_macro_metrics_dict=noddi_macro_metrics_dict,
+        dki_macro_metrics_dict=dki_macro_metrics_dict,
+    )
+
+    mat = prep["mat"]
+    pmap = prep["pmap"]
+    bundles = prep["bundles"]
+    metrics = prep["metrics"]
+    lookup_dict = prep["lookup_dict"]
+    main_metrics = prep["main_metrics"]
+    unique_metrics = prep["unique_metrics"]
+
+    if len(metrics) == 0:
+        raise ValueError(
+            f"No plottable metrics found for covariate={covariate!r}. "
+            f"Parsed unique metrics: {sorted(unique_metrics)}"
+        )
+
     if norm is None:
         vals = mat.values.ravel()
-        vmax = np.nanpercentile(np.abs(vals), 98)
+        vals = vals[~np.isnan(vals)]
+        vmax = np.nanpercentile(np.abs(vals), 98) if len(vals) else 1.0
+        if vmax == 0:
+            vmax = 1.0
         norm = plt.Normalize(vmin=-vmax, vmax=vmax)
 
     def star(p):
-        if p < alphas[2]: return "***"
-        if p < alphas[1]: return "**"
-        if p < alphas[0]: return "*"
-        return ""
+        if p < alphas[2]:
+            return "***"
+        elif p < alphas[1]:
+            return "**"
+        elif p < alphas[0]:
+            return "*"
+        else:
+            return ""
 
     ax.set_xlim(0, len(metrics))
     ax.set_ylim(0, len(bundles))
@@ -401,24 +488,31 @@ def make_partial_r_heatmap_with_fdr_stars(df, covariate, ax, cmap, noddi_macro_m
             sig = (not pd.isna(pval)) and (pval < alphas[0])
 
             if (not sig) or pd.isna(val):
-                ax.add_patch(plt.Rectangle((j, i), 1, 1, color="gainsboro", ec="none"))
+                ax.add_patch(
+                    plt.Rectangle((j, i), 1, 1, facecolor="gainsboro", edgecolor="none")
+                )
                 continue
 
-            ax.add_patch(plt.Rectangle((j, i), 1, 1, facecolor=cmap(norm(val)), edgecolor="none"))
-            s = star(pval)
-            if s: draw_star(ax, j + 0.5, i + 0.5, s, fontsize=6.5)
+            ax.add_patch(
+                plt.Rectangle((j, i), 1, 1, facecolor=cmap(norm(val)), edgecolor="none")
+            )
 
-    for j in range(len(metrics) + 1): ax.axvline(j, color="#cccccc", lw=0.25, zorder=0)
-    for i in range(len(bundles) + 1): ax.axhline(i, color="#cccccc", lw=0.25, zorder=0)
+            s = star(pval)
+            if s:
+                draw_star(ax, j + 0.5, i + 0.5, s, fontsize=6.5)
 
     ax.set_xticks(np.arange(len(metrics)) + 0.5)
     ax.set_yticks(np.arange(len(bundles)) + 0.5)
 
-    ax.set_xticklabels([lookup_dict.get(m, m) for m in metrics], rotation=45, ha="right", va="top")
+    ax.set_xticklabels(
+        [lookup_dict.get(m, m) for m in metrics],
+        rotation=35, ha="right", va="top"
+    )
     ax.tick_params(axis="x", pad=1)
     ax.margins(x=0)
 
-    ax.set_yticklabels([tract_dict.get(b, b) for b in bundles])
+    bundles_clean = [clean_bundle_name_noLR(b) for b in bundles]
+    ax.set_yticklabels(bundles_clean)
 
     for tick_label, raw_bundle in zip(ax.get_yticklabels(), bundles):
         bundle_type = get_bundle_type(raw_bundle)
@@ -427,18 +521,15 @@ def make_partial_r_heatmap_with_fdr_stars(df, covariate, ax, cmap, noddi_macro_m
             tick_label.set_fontweight("bold")
 
     divider_index = len(main_metrics)
-    if divider_index > 0 and divider_index < len(metrics): ax.axvline(divider_index, color="black", lw=2.0)
-
-    ax.set_title(f"{covariate} — Partial r", pad=6)
-    ax.set_xlabel("Metric")
-    ax.set_ylabel("Bundle")
+    if divider_index > 0:
+        ax.axvline(divider_index, color="black", lw=2.0)
 
     fig = ax.figure
     pos = ax.get_position()
 
     gap = 0.010
-    strip_w = 0.075
-    cbar_w = 0.018
+    strip_w = 0.060
+    cbar_w = 0.012
 
     ax.set_position([pos.x0, pos.y0, pos.width - (strip_w + gap), pos.height])
     pos = ax.get_position()
@@ -446,15 +537,343 @@ def make_partial_r_heatmap_with_fdr_stars(df, covariate, ax, cmap, noddi_macro_m
     mappable = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
     mappable.set_array([])
 
-    cbar_h = 0.70 * pos.height
-    cbar_y = pos.y0 + 0.5 * (pos.height - cbar_h)
-    cbar_x = pos.x0 + pos.width + gap
+    cbar_h = 0.58 * pos.height
+    cbar_x = pos.x1 + gap
+    cbar_y = pos.y1 - cbar_h
 
     cax = fig.add_axes([cbar_x, cbar_y, cbar_w, cbar_h])
     cbar = fig.colorbar(mappable, cax=cax)
     cbar.set_label(cbar_label, labelpad=8)
 
-    for spine in ax.spines.values(): spine.set_visible(False)
-    for spine in cbar.ax.spines.values(): spine.set_visible(False)
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+    for spine in cbar.ax.spines.values():
+        spine.set_visible(False)
 
     return ax
+
+
+def make_interaction_t_heatmap_split_half(
+    dfA,
+    dfB,
+    covariate,
+    ax,
+    cmap,
+    noddi_macro_metrics_dict=None,
+    dki_macro_metrics_dict=None,
+    norm=None,
+    alpha=0.05,
+    use_fdr=True,
+    sig_mode="both",   # "both", "either", "none"
+    bundle_palette=None,
+    gray_color="gainsboro",
+    cbar_label="Sex × General SES interaction (t-statistic)"
+):
+    """
+    Split-half interaction heatmap:
+      upper-left triangle = A
+      lower-right triangle = B
+      non-significant cells grayed out depending on sig_mode
+    """
+
+    dfA = collapse_lr(dfA[dfA["covariate"] == covariate])
+    dfB = collapse_lr(dfB[dfB["covariate"] == covariate])
+
+    p_col = "p_fdr" if use_fdr else "p_value"
+
+    dfA = dfA.groupby(["bundle", "metric", "covariate"], as_index=False).agg(
+        {"t_stat": "mean", p_col: "mean"}
+    )
+    dfB = dfB.groupby(["bundle", "metric", "covariate"], as_index=False).agg(
+        {"t_stat": "mean", p_col: "mean"}
+    )
+
+    unique_metrics = dfA["metric"].unique().tolist()
+
+    if any(m.startswith("NODDI") for m in unique_metrics):
+        lookup_dict = noddi_macro_metrics_dict if noddi_macro_metrics_dict is not None else {}
+        main_metrics = sorted([m for m in unique_metrics if m.startswith("NODDI")])
+        other_metrics = [m for m in unique_metrics if not m.startswith("NODDI")]
+    else:
+        lookup_dict = dki_macro_metrics_dict if dki_macro_metrics_dict is not None else {}
+        main_metrics = sorted([m for m in unique_metrics if m.startswith("DKI")])
+        other_metrics = [m for m in unique_metrics if not m.startswith("DKI")]
+
+    macro_order = [
+        "1st_quarter_volume_mm3", "2nd_and_3rd_quarter_volume_mm3", "4th_quarter_volume_mm3",
+        "volume_of_end_branches_1", "volume_of_end_branches_2", "total_volume_mm3",
+        "area_of_end_region_1_mm2", "area_of_end_region_2_mm2", "total_area_of_end_regions_mm2",
+        "total_surface_area_mm2", "radius_of_end_region_1_mm", "radius_of_end_region_2_mm",
+        "total_radius_of_end_regions_mm", "irregularity", "curl", "elongation",
+        "mean_length_mm", "span_mm"
+    ]
+    macro_metrics = [m for m in macro_order if m in other_metrics]
+    metric_order = main_metrics + macro_metrics
+
+    matA = dfA.pivot(index="bundle", columns="metric", values="t_stat").reindex(columns=metric_order)
+    pA   = dfA.pivot(index="bundle", columns="metric", values=p_col).reindex_like(matA)
+
+    matB = dfB.pivot(index="bundle", columns="metric", values="t_stat").reindex(columns=metric_order)
+    pB   = dfB.pivot(index="bundle", columns="metric", values=p_col).reindex_like(matA)
+
+    bundles = matA.index.tolist()
+    metrics = matA.columns.tolist()
+
+    if norm is None:
+        combined_vals = np.concatenate([matA.values.ravel(), matB.values.ravel()])
+        combined_vals = combined_vals[~np.isnan(combined_vals)]
+        vmax = np.nanpercentile(np.abs(combined_vals), 98) if len(combined_vals) else 1.0
+        if vmax == 0:
+            vmax = 1.0
+        norm = plt.Normalize(vmin=-vmax, vmax=vmax)
+
+    ax.set_xlim(0, len(metrics))
+    ax.set_ylim(0, len(bundles))
+    ax.invert_yaxis()
+
+    for i, bundle in enumerate(bundles):
+        for j, metric in enumerate(metrics):
+
+            valA = matA.loc[bundle, metric]
+            valB = matB.loc[bundle, metric]
+            pvalA = pA.loc[bundle, metric]
+            pvalB = pB.loc[bundle, metric]
+
+            sigA = (not pd.isna(pvalA)) and (pvalA < alpha)
+            sigB = (not pd.isna(pvalB)) and (pvalB < alpha)
+
+            if sig_mode == "both":
+                show_cell = sigA and sigB
+            elif sig_mode == "either":
+                show_cell = sigA or sigB
+            elif sig_mode == "none":
+                show_cell = True
+            else:
+                raise ValueError("sig_mode must be one of: 'both', 'either', 'none'")
+
+            if (not show_cell) or (pd.isna(valA) and pd.isna(valB)):
+                ax.add_patch(plt.Rectangle((j, i), 1, 1, color=gray_color, ec="none"))
+                continue
+
+            # upper-left triangle = A
+            if not pd.isna(valA):
+                ax.add_patch(
+                    plt.Polygon(
+                        [(j, i + 1), (j, i), (j + 1, i)],
+                        facecolor=cmap(norm(valA)),
+                        edgecolor="none"
+                    )
+                )
+            else:
+                ax.add_patch(
+                    plt.Polygon(
+                        [(j, i + 1), (j, i), (j + 1, i)],
+                        facecolor=gray_color,
+                        edgecolor="none"
+                    )
+                )
+
+            # lower-right triangle = B
+            if not pd.isna(valB):
+                ax.add_patch(
+                    plt.Polygon(
+                        [(j + 1, i), (j + 1, i + 1), (j, i + 1)],
+                        facecolor=cmap(norm(valB)),
+                        edgecolor="none"
+                    )
+                )
+            else:
+                ax.add_patch(
+                    plt.Polygon(
+                        [(j + 1, i), (j + 1, i + 1), (j, i + 1)],
+                        facecolor=gray_color,
+                        edgecolor="none"
+                    )
+                )
+
+    ax.set_xticks(np.arange(len(metrics)) + 0.5)
+    ax.set_yticks(np.arange(len(bundles)) + 0.5)
+
+    ax.set_xticklabels(
+        [lookup_dict.get(m, m) for m in metrics],
+        rotation=35, ha="right", va="top"
+    )
+    ax.tick_params(axis="x", pad=1)
+    ax.margins(x=0)
+
+    bundles_clean = [clean_bundle_name_noLR(b) for b in bundles]
+    ax.set_yticklabels(bundles_clean)
+
+    for tick_label, raw_bundle in zip(ax.get_yticklabels(), bundles):
+        bundle_type = get_bundle_type(raw_bundle)
+        if bundle_palette is not None and bundle_type in bundle_palette:
+            tick_label.set_color(bundle_palette[bundle_type])
+            tick_label.set_fontweight("bold")
+
+    divider_index = len(main_metrics)
+    if divider_index > 0:
+        ax.axvline(divider_index, color="black", lw=2.0)
+
+    fig = ax.figure
+    pos = ax.get_position()
+
+    gap = 0.010
+    strip_w = 0.060
+    cbar_w = 0.012
+
+    ax.set_position([pos.x0, pos.y0, pos.width - (strip_w + gap), pos.height])
+    pos = ax.get_position()
+
+    mappable = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
+    mappable.set_array([])
+
+    cbar_h = 0.58 * pos.height
+    cbar_x = pos.x1 + gap
+    cbar_y = pos.y1 - cbar_h
+
+    cax = fig.add_axes([cbar_x, cbar_y, cbar_w, cbar_h])
+    cbar = fig.colorbar(mappable, cax=cax)
+    cbar.set_label(cbar_label, labelpad=8)
+
+    # dataset legend
+    leg_x = cbar_x - 0.02
+    v_gap = 0.05
+    leg_w = 0.16
+    leg_h = 0.16
+    leg_y = cbar_y - leg_h - v_gap
+
+    lax = fig.add_axes([leg_x, leg_y, leg_w, leg_h])
+    lax.set_xlim(0, 1)
+    lax.set_ylim(0, 1)
+    lax.set_aspect("equal")
+    lax.axis("off")
+
+    lax.text(0.00, 0.90, "Dataset", ha="left", va="top", fontsize=9)
+
+    x0, y0, s = 0.00, 0.22, 0.22
+    lax.add_patch(plt.Rectangle((x0, y0), s, s, facecolor="white", edgecolor="black", lw=0.8))
+    lax.add_patch(
+        plt.Polygon([(x0, y0 + s), (x0, y0), (x0 + s, y0 + s)],
+                    facecolor="lightgray", edgecolor="none")
+    )
+    lax.add_patch(
+        plt.Polygon([(x0 + s, y0 + s), (x0 + s, y0), (x0, y0)],
+                    facecolor="darkgray", edgecolor="none")
+    )
+
+    text_x = x0 + s + 0.12
+    lax.text(text_x, y0 + 0.18, "Upper = Discovery", ha="left", va="center", fontsize=8)
+    lax.text(text_x, y0 + 0.02, "Lower = Replication", ha="left", va="center", fontsize=8)
+
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+    for spine in cbar.ax.spines.values():
+        spine.set_visible(False)
+
+    return ax
+
+def run_interaction_tstats(
+    df,
+    msmt_cols,
+    covariates,
+    exposure="General_SES",
+    sex_var="sex",
+    include_etiv=False,
+    etiv_var="eTIV"
+):
+    """
+    Run one linear model per feature:
+        y ~ sex + exposure + sex:exposure + other covariates (+ eTIV)
+
+    Returns:
+        DataFrame with columns:
+        feature, covariate, interaction_term, t_stat, beta, p_value, p_fdr
+    """
+
+    df = df.copy()
+
+    # covariates to include as main effects besides sex/exposure
+    extra_covs = [c for c in covariates if c not in [sex_var, exposure]]
+    if include_etiv and etiv_var not in extra_covs:
+        extra_covs = extra_covs + [etiv_var]
+
+    out_rows = []
+
+    for feat in msmt_cols:
+        cols_needed = [feat, sex_var, exposure] + extra_covs
+        sub = df[cols_needed].dropna().copy()
+
+        if sub.empty:
+            out_rows.append({
+                "feature": feat,
+                "covariate": exposure,
+                "interaction_term": f"{sex_var}:{exposure}",
+                "beta": np.nan,
+                "t_stat": np.nan,
+                "p_value": np.nan
+            })
+            continue
+
+        # z-score outcome for comparability across features
+        y = sub[feat]
+        y_sd = y.std(ddof=0)
+        if pd.isna(y_sd) or y_sd == 0:
+            out_rows.append({
+                "feature": feat,
+                "covariate": exposure,
+                "interaction_term": f"{sex_var}:{exposure}",
+                "beta": np.nan,
+                "t_stat": np.nan,
+                "p_value": np.nan
+            })
+            continue
+
+        sub[feat] = (y - y.mean()) / y_sd
+
+        # formula
+        rhs_terms = [sex_var, exposure, f"{sex_var}:{exposure}"] + extra_covs
+        formula = f"{feat} ~ " + " + ".join(rhs_terms)
+
+        try:
+            model = smf.ols(formula=formula, data=sub).fit()
+
+            # statsmodels can name the interaction either sex:exposure or exposure:sex
+            interaction_name_1 = f"{sex_var}:{exposure}"
+            interaction_name_2 = f"{exposure}:{sex_var}"
+
+            if interaction_name_1 in model.params.index:
+                term = interaction_name_1
+            elif interaction_name_2 in model.params.index:
+                term = interaction_name_2
+            else:
+                term = interaction_name_1  # fallback label
+
+            beta = model.params.get(term, np.nan)
+            t_stat = model.tvalues.get(term, np.nan)
+            p_val = model.pvalues.get(term, np.nan)
+
+        except Exception:
+            beta = np.nan
+            t_stat = np.nan
+            p_val = np.nan
+            term = f"{sex_var}:{exposure}"
+
+        out_rows.append({
+            "feature": feat,
+            "covariate": exposure,
+            "interaction_term": term,
+            "beta": beta,
+            "t_stat": t_stat,
+            "p_value": p_val
+        })
+
+    df_out = pd.DataFrame(out_rows)
+
+    valid = df_out["p_value"].notna()
+    p_fdr = np.full(len(df_out), np.nan)
+    if valid.sum() > 0:
+        _, p_fdr_valid, _, _ = multipletests(df_out.loc[valid, "p_value"], method="fdr_bh")
+        p_fdr[valid] = p_fdr_valid
+
+    df_out["p_fdr"] = p_fdr
+    return df_out

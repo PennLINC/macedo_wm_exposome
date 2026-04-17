@@ -38,7 +38,32 @@ HBN_DIR <- file.path(CLEANED_DIR, "HBN")
 
 # Load data
 hbn_raw  <- read.csv(file.path(HBN_DIR, "final_hbn_dataset_12_23.csv"))
-abcd_raw <- read.csv(file.path(CLEANED_DIR, "exposome_FINAL_cognition_11_10.csv"))
+abcd_raw <- read.csv(file.path(CLEANED_DIR, "exposome_FINAL_11_3.csv"))
+
+# -------------------------
+# FIX NODDI naming in ABCD
+# -------------------------
+
+# 1. Identify bundle columns
+abcd_bundle_cols <- grep("^bundle_", names(abcd_raw), value = TRUE)
+
+# 2. Drop NODDI mean columns
+drop_cols <- abcd_bundle_cols[grepl("NODDI_.*_mean$", abcd_bundle_cols, ignore.case = TRUE)]
+if (length(drop_cols) > 0) {
+  message("[INFO] Dropping NODDI mean cols: ", length(drop_cols))
+  abcd_raw <- abcd_raw[, !(names(abcd_raw) %in% drop_cols), drop = FALSE]
+}
+
+# 3. Rename NODDI median → remove suffix
+rename_cols <- grep("NODDI_.*_median$", names(abcd_raw), value = TRUE)
+
+if (length(rename_cols) > 0) {
+  new_names <- sub("_median$", "", rename_cols)
+  
+  message("[INFO] Renaming NODDI median cols: ", length(rename_cols))
+  
+  names(abcd_raw)[match(rename_cols, names(abcd_raw))] <- new_names
+}
 ```
 
 # 1) standardize key covariate names to match across datasets
