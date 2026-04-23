@@ -29,7 +29,6 @@ cat("Running analysis:", analysis_type, "\n")
 # -------------------------
 # Paths
 # -------------------------
-# ROOT_DIR <- "/Users/bmacedo/Desktop/final_WM"
 ROOT_DIR <- "/mnt/isilon/bgdlab_hbcd/projects/macedo_wm_exposome/macedo_wm_exposome"
 
 OUTPUT_DIR <- file.path(ROOT_DIR, "output_data")
@@ -73,25 +72,64 @@ cat("Group B:", n_B, "\n")
 # -------------------------
 # Batch variable
 # -------------------------
-exposome_batch <- factor(as.character(exposome_df$site))
+if (!("batch_device_software" %in% names(exposome_df))) {
+  stop("Column 'batch_device_software' not found in exposome_df")
+}
 
-cat("Batch counts:\n")
-print(table(exposome_batch, useNA = "ifany"))
+exposome_batch <- factor(as.character(exposome_df$batch_device_software))
+
+cat("Batch counts (full sample):\n")
+print(sort(table(exposome_batch, useNA = "ifany"), decreasing = FALSE))
+
+if (any(is.na(exposome_batch))) {
+  stop("Batch variable contains NA values")
+}
+
+# -------------------------
+# Drop globally tiny batches
+# Need at least 2 subjects per batch for CovBat/rowVars
+# -------------------------
+batch_counts <- table(exposome_batch)
+valid_batches_global <- names(batch_counts[batch_counts >= 2])
+
+keep_global <- as.character(exposome_batch) %in% valid_batches_global
+
+cat("Subjects kept after global batch-size filter (>=2):", sum(keep_global), "\n")
+cat("Subjects dropped after global batch-size filter (<2):", sum(!keep_global), "\n")
+
+if (sum(!keep_global) > 0) {
+  cat("Dropped globally tiny batches:\n")
+  print(sort(table(droplevels(exposome_batch[!keep_global])), decreasing = TRUE))
+}
+
+if (sum(keep_global) == 0) {
+  stop("No subjects remain after global batch-size filtering")
+}
+
+# Apply global filter to dataframe and train indicators
+exposome_df_filt <- exposome_df[keep_global, , drop = FALSE]
+exposome_batch_filt <- droplevels(exposome_batch[keep_global])
+train_A_filt <- exposome_group_vector_A_train[keep_global]
+train_B_filt <- exposome_group_vector_B_train[keep_global]
+
+cat("Filtered rows:", nrow(exposome_df_filt), "\n")
+cat("Filtered Group A:", sum(train_A_filt), "\n")
+cat("Filtered Group B:", sum(train_B_filt), "\n")
 
 # -------------------------
 # Feature matrix for covbat
 # covbat expects features x subjects
 # -------------------------
-msmt_cols <- grep("^bundle", names(exposome_df), value = TRUE)
+msmt_cols <- grep("^bundle", names(exposome_df_filt), value = TRUE)
 
 cat("Number of msmt columns:", length(msmt_cols), "\n")
 print(head(msmt_cols, 20))
 
 if (length(msmt_cols) == 0) {
-  stop("No msmt columns found in exposome_df")
+  stop("No msmt columns found in exposome_df_filt")
 }
 
-data_exposome_clean <- exposome_df[, msmt_cols, drop = FALSE]
+data_exposome_clean <- exposome_df_filt[, msmt_cols, drop = FALSE]
 data_exposome <- data.matrix(data_exposome_clean)
 storage.mode(data_exposome) <- "double"
 data_exposome <- t(data_exposome)
@@ -107,7 +145,7 @@ if (analysis_type == "main") {
     ~ age + sex +
       General_SES + School + Family_Values + Family_Turmoil +
       Dense_Urban_Poverty + Extracurriculars + Screen_Time,
-    data = exposome_df
+    data = exposome_df_filt
   )
 }
 
@@ -117,44 +155,93 @@ if (analysis_type == "cognition") {
       General_SES + School + Family_Values + Family_Turmoil +
       Dense_Urban_Poverty + Extracurriculars + Screen_Time +
       neurocog_pc1.bl + neurocog_pc2.bl + neurocog_pc3.bl,
-    data = exposome_df
+    data = exposome_df_filt
   )
 }
 
 if (analysis_type == "income") {
   mod_exposome <- model.matrix(
     ~ age + sex + parental_education + income + le_l_adi__addr1__national_prcnt,
-    data = exposome_df
+    data = exposome_df_filt
   )
 }
 
 cat("mod_exposome dim:", paste(dim(mod_exposome), collapse = " x "), "\n")
 print(object.size(mod_exposome), units = "MB")
 
+if (any(is.na(mod_exposome))) {
+  stop("mod_exposome contains NA values")
+}
+
+if (any(is.na(data_exposome))) {
+  stop("data_exposome contains NA values")
+}
+
+# Optional sanity check
+mod_tr_A <- mod_exposome[train_A_filt, , drop = FALSE]
+cat("rank(mod_tr_A):", qr(mod_tr_A)$rank, "\n")
+cat("ncol(mod_tr_A):", ncol(mod_tr_A), "\n")
+
 # -------------------------
-# Run CovBat
-# Older API with train indicator
+# A-trained CovBat
+# Keep only subjects whose batch appears in A training set
 # -------------------------
-gc()
+batches_in_A <- unique(as.character(exposome_batch_filt[train_A_filt]))
+keep_A_run <- as.character(exposome_batch_filt) %in% batches_in_A
+
+cat("Subjects kept for A-trained CovBat:", sum(keep_A_run), "\n")
+cat("Subjects dropped for A-trained CovBat:", sum(!keep_A_run), "\n")
+
+if (sum(!keep_A_run) > 0) {
+  cat("Dropped for A-trained CovBat (batch absent from A training set):\n")
+  print(sort(table(droplevels(exposome_batch_filt[!keep_A_run])), decreasing = TRUE))
+}
+
+data_exposome_A <- data_exposome[, keep_A_run, drop = FALSE]
+bat_A <- droplevels(exposome_batch_filt[keep_A_run])
+mod_A <- mod_exposome[keep_A_run, , drop = FALSE]
+train_A <- train_A_filt[keep_A_run]
+df_A <- exposome_df_filt[keep_A_run, , drop = FALSE]
 
 cat("Running covbat with A as training set...\n")
+gc()
 covbat_exposome_A <- covbat(
-  dat   = data_exposome,
-  bat   = exposome_batch,
-  mod   = mod_exposome,
-  train = exposome_group_vector_A_train
+  dat   = data_exposome_A,
+  bat   = bat_A,
+  mod   = mod_A,
+  train = train_A
 )
-
 gc()
 
-cat("Running covbat with B as training set...\n")
-covbat_exposome_B <- covbat(
-  dat   = data_exposome,
-  bat   = exposome_batch,
-  mod   = mod_exposome,
-  train = exposome_group_vector_B_train
-)
+# -------------------------
+# B-trained CovBat
+# Keep only subjects whose batch appears in B training set
+# -------------------------
+batches_in_B <- unique(as.character(exposome_batch_filt[train_B_filt]))
+keep_B_run <- as.character(exposome_batch_filt) %in% batches_in_B
 
+cat("Subjects kept for B-trained CovBat:", sum(keep_B_run), "\n")
+cat("Subjects dropped for B-trained CovBat:", sum(!keep_B_run), "\n")
+
+if (sum(!keep_B_run) > 0) {
+  cat("Dropped for B-trained CovBat (batch absent from B training set):\n")
+  print(sort(table(droplevels(exposome_batch_filt[!keep_B_run])), decreasing = TRUE))
+}
+
+data_exposome_B <- data_exposome[, keep_B_run, drop = FALSE]
+bat_B <- droplevels(exposome_batch_filt[keep_B_run])
+mod_B <- mod_exposome[keep_B_run, , drop = FALSE]
+train_B <- train_B_filt[keep_B_run]
+df_B <- exposome_df_filt[keep_B_run, , drop = FALSE]
+
+cat("Running covbat with B as training set...\n")
+gc()
+covbat_exposome_B <- covbat(
+  dat   = data_exposome_B,
+  bat   = bat_B,
+  mod   = mod_B,
+  train = train_B
+)
 gc()
 
 # -------------------------
@@ -169,22 +256,32 @@ cat("harmonized_exposome_B dim:", paste(dim(harmonized_exposome_B), collapse = "
 
 # -------------------------
 # Combine harmonized metrics back with original dataframe
+# Use the filtered dataframes matching each run
 # -------------------------
-msmt_idx <- grep("^bundle", names(exposome_df))
+msmt_idx_A <- grep("^bundle", names(df_A))
+msmt_idx_B <- grep("^bundle", names(df_B))
 
 df_harmonized_exposome_A <- cbind(
-  exposome_df[, -msmt_idx, drop = FALSE],
+  df_A[, -msmt_idx_A, drop = FALSE],
   as.data.frame(harmonized_exposome_A)
 )
 
 df_harmonized_exposome_B <- cbind(
-  exposome_df[, -msmt_idx, drop = FALSE],
+  df_B[, -msmt_idx_B, drop = FALSE],
   as.data.frame(harmonized_exposome_B)
 )
 
 # preserve original metric names
-colnames(df_harmonized_exposome_A)[(ncol(df_harmonized_exposome_A) - length(msmt_cols) + 1):ncol(df_harmonized_exposome_A)] <- msmt_cols
-colnames(df_harmonized_exposome_B)[(ncol(df_harmonized_exposome_B) - length(msmt_cols) + 1):ncol(df_harmonized_exposome_B)] <- msmt_cols
+colnames(df_harmonized_exposome_A)[
+  (ncol(df_harmonized_exposome_A) - length(msmt_cols) + 1):ncol(df_harmonized_exposome_A)
+] <- msmt_cols
+
+colnames(df_harmonized_exposome_B)[
+  (ncol(df_harmonized_exposome_B) - length(msmt_cols) + 1):ncol(df_harmonized_exposome_B)
+] <- msmt_cols
+
+cat("Final A output rows:", nrow(df_harmonized_exposome_A), "\n")
+cat("Final B output rows:", nrow(df_harmonized_exposome_B), "\n")
 
 # -------------------------
 # Output filenames
