@@ -2,7 +2,8 @@
 
 # Replication Guide
 
-1. TOC {:toc}
+* TOC
+{:toc}
 
 ## Abstract
 
