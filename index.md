@@ -87,7 +87,7 @@ To generate tracts, we use DSIStudio: https://dsi-studio.labsolver.org/download.
 
 ## Step 1: Prepare Dataset
 
-### **Notebook:** `Step1_Data_Prep.ipynb`
+### ** Python Notebook:** `Step1_Data_Prep.ipynb`
 
 ### **Goal**
 
@@ -134,7 +134,7 @@ Remove:
 
 ## Step 2: Covbat Harmonization
 
-### **R Script (preferred):** `Step2_covbat_harmonization_ses.R`
+### **R Script:** `Step2_covbat_harmonization_ses.R`
 
 Run this script in the terminal with: 
 
@@ -154,7 +154,7 @@ Harmonize white matter features across ABCD sites using CovBat with:
 
 These two harmonized datasets are later used depending on which split half is treated as the **training** set in downstream analyses.
 
-### **Input**
+### **Inputs**
 
 - Output of Step 1:
     - for main analysis: `exposome_FINAL_11_3.csv`
@@ -192,7 +192,7 @@ mod_exposome <- model.matrix(~ age + sex + parental_education + income + le_l_ad
                               data = exposome_df_filt)
 ```
 
-### **Output**
+### **Outputs**
 
 Main analysis
 
@@ -331,7 +331,7 @@ $$
 
 Test whether tract-level PCA results (PC1 bundle scores from Step 4) relate to **sensorimotor–association (S-A) axis range** annotations for each tract.
 
-### **Input data**
+### **Inputs**
 
 - Outputs from Step 4:
     - `pca_ALL_LRkept_bundle_scores_PC12.csv`
@@ -371,7 +371,7 @@ Each file is already harmonized and contains columns:
 - features: all columns starting with msmt_ (WM features)
 - split label: matched_group (values 1/2 for the split halves)
 
-### **Split-half structure and training/testing directions**
+### **Split-half structure and training/testing**
 
 Each harmonized dataset (A-harmonized, B-harmonized) contains both matched groups, but the *harmonization* was trained on one half only (**Step 2**).
 
