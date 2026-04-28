@@ -1,10 +1,10 @@
-# Replication Guide
+# White matter reflects the childhood exposome
 
-# Project Information
+# Replication Guide
 
 ## Abstract
 
-The childhood environment is critical for brain development and contributes to cognitive outcomes. However, most neuroimaging studies examine broad environmental measures (e.g., socioeconomic status) or a limited set of exposures, obscuring how  additive exposures jointly influence brain development. Here we investigated how the childhood exposome, a multidimensional measure capturing a wide variety of environmental exposures, relates to white matter shape and tissue properties in youth. Using multi-shell diffusion MRI from 8,183 children (ages 9-10) in the ABCD study, we quantified  microstructural and macrostructural properties across 62 person-specific white matter tracts. The exposome showed widespread and highly replicable associations with both white matter microstructure and macrostructure. These effects varied systematically depending on how much of the sensorimotor-association cortical hierarchy a tract traversed, with the strongest associations observed in tracts linking lower-order sensorimotor to higher-order association regions. Multivariate models demonstrated that patterns of white matter features were associated with 25% of the variance in exposome burden in unseen individuals (out of sample *r*=0.51). Notably, white matter-based prediction of cognition was markedly reduced after accounting for the exposome (*r*=0.38 to *r*=0.16; an ~82% reduction in explained variance), suggesting that much of the brain-cognition association reflects shared variance with the exposome. These findings generalized to an independent cohort, the Healthy Brain Network (*n*=1,643), which differs substantially from ABCD in MRI acquisition, participant selection, and childhood environments. Together, these results suggest that the childhood environment is reflected in developing white matter architecture.
+The childhood environment is critical for brain development and contributes to cognitive outcomes. However, most neuroimaging studies examine a single environmental measure (e.g., socioeconomic status) or a limited set of exposures, obscuring how additive exposures jointly influence brain development. Here we investigated how white matter shape and tissue properties in youth are linked to the childhood exposome, a multidimensional measure capturing a wide variety of environmental exposures. Using multi-shell diffusion MRI from 8,183 children (ages 9-10) in the ABCD study, we quantified microstructural and macrostructural properties across 62 person-specific white matter tracts. The exposome showed widespread and highly replicable associations with both white matter microstructure and macrostructure. The strength of these effects was related to the degree a tract spanned the cortical hierarchy defined by the sensorimotor-association axis. Multivariate models demonstrated that patterns of white matter features explained 25% of the variance in the exposome in unseen individuals (out of sample r=0.50). Notably, white matter-based prediction of cognition was markedly reduced after accounting for the exposome (r=0.37 to r=0.16; an ~82% reduction in explained variance), indicating that brain-cognition associations overlap substantially with variance captured by the exposome. These findings generalized to an independent cohort, the Healthy Brain Network (n=869), which differs substantially from ABCD in MRI acquisition, participant selection, and childhood environments. Together, these results suggest that the environment is reflected in developing white matter architecture in childhood.
 
 ## Project Lead
 
@@ -20,49 +20,7 @@ Joëlle Bagautdinova
 
 ## Collaborators
 
-Briana Macedo1,2,3, Joëlle Bagautdinova1,2,3, Steven L. Meisler1,2,3, Matthew Cieslak1,2,3, Lucinda M. Sisk1,2,3, Christos Davatazikos4,5,6, Alexandre R. Franco7,8,9, Meike D. Hettwer1,2,3, Arielle S. Keller10,11, Gregory Kiar12, Audrey C. Luo1,2,3, Allyson P. Mackey13, Michael P. Milham7,12, Tyler M. Moore2,3, Valerie J. Sydnor14, Kevin Y. Sun1,2,3,15, Fang-Cheng Yeh16, Ran Barzilay2,3,15, Damien A. Fair17,18,19, Russell T. Shinohara4,20, Aaron Alexander-Bloch2,3,15, Theodore D. Satterthwaite1,2,3,4,5
-
-**Affiliations**
-
-1Penn Lifespan Informatics and Neuroimaging Center (PennLINC), Department of Psychiatry, Perelman School of Medicine, University of Pennsylvania, Philadelphia, PA, USA
-
-2Department of Psychiatry, Perelman School of Medicine, University of Pennsylvania, Philadelphia, PA, USA
-
-3Lifespan Brain Institute (LiBI), Children’s Hospital of Philadelphia and Penn Medicine, Philadelphia, PA, USA
-
-4Center for Biomedical Image Computing and Analytics, University of Pennsylvania, Philadelphia, PA, USA
-
-5Center for AI and Data Science for Integrated Diagnostics (AI2D), Perelman School of Medicine, University of Pennsylvania, Philadelphia, PA, USA
-
-6Department of Radiology, University of Pennsylvania, Philadelphia, PA, USA
-
-7Center for Biomedical Imaging and Neuromodulation, Nathan Kline Institute for Psychiatric Research, Orangeburg, NY, USA
-
-8Strategic Data Initiatives, Child Mind Institute, New York, NY, USA
-
-9Department of Psychiatry, NYU Grossman School of Medicine, New York, NY, USA
-
-10Department of Psychological Sciences, University of Connecticut, Storrs, CT, USA
-
-11Institute for the Brain and Cognitive Sciences, University of Connecticut, Storrs, CT, USA
-
-12Center for Data Analytics, Innovation, and Rigor, Child Mind Institute, New York, NY, USA
-
-13Department of Psychology, School of Arts and Sciences, University of Pennsylvania, Philadelphia, PA, USA
-
-14Department of Psychiatry, University of Pittsburgh Medical Center, University of Pittsburgh, Pittsburgh, PA, USA
-
-15Department of Child and Adolescent Psychiatry and Behavioral Science, Children’s Hospital of Philadelphia, Philadelphia, PA, USA
-
-16Department of Neurological Surgery, University of Pittsburgh, Pittsburgh, PA, USA
-
-17Department of Pediatrics, University of Minnesota, Minneapolis, MN, USA
-
-18Institute of Child Development, University of Minnesota, Minneapolis, MN, USA
-
-19Masonic Institute for the Developing Brain, University of Minnesota, Minneapolis, MN, USA
-
-20Penn Statistics in Imaging and Visualization Center, Department of Biostatistics, Epidemiology, and Informatics, Perelman School of Medicine, University of Pennsylvania, Philadelphia, PA, USA
+Joëlle Bagautdinova, Steven L. Meisler, Matthew Cieslak, Lucinda M. Sisk, Christos Davatazikos, Alexandre R. Franco, Meike D. Hettwer, Arielle S. Keller, Gregory Kiar, Audrey C. Luo, Allyson P. Mackey, Michael P. Milham, Tyler M. Moore, Valerie J. Sydnor, Kevin Y. Sun, Fang-Cheng Yeh, Ran Barzilay, Damien A. Fair, Russell T. Shinohara, Aaron Alexander-Bloch, Theodore D. Satterthwaite
 
 ## Project Start Date
 
@@ -112,11 +70,17 @@ project_root/
 
 ## Step 0: Required Software
 
-To access required software, you can download the `macedo-em-exposome-env.yml` file from GitHub: https://github.com/PennLINC/macedo_wm_exposome/blob/main/macedo-em-exposome-env.yml 
+To access required Python software, you can download the `macedo-em-exposome-env.yml` file from GitHub: https://github.com/PennLINC/macedo_wm_exposome/blob/main/macedo-em-exposome-env.yml 
 
 Then, you can use anaconda/mamba to create an environment with the required software packages.
 
 - `conda env create -f macedo-em-exposome-env.yml`
+
+To access required R software, you can download `install_r_packages.sh` file from GitHub and then run
+- chmod +x install_r_packages.sh
+- bash install_r_packages.sh
+
+To generate tracts, we use DSIStudio: https://dsi-studio.labsolver.org/download.html for MacOS15+.
 
 ## Step 1: Prepare Dataset
 
