@@ -1,3 +1,5 @@
+input_data/
+
 # Custom (PennLINC) gitignore
 .DS_Store
 
